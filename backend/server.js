@@ -9,106 +9,82 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// MongoDB Connection
-const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost:27017/student_feedback';
+// ─── MONGODB CONNECTION OPTIMIZATION ──────────────────
+const MONGO_URI = process.env.MONGO_URI;
 
-mongoose.connect(MONGO_URI)
-  .then(() => console.log('✅ MongoDB connected successfully'))
-  .catch(err => console.error('❌ MongoDB connection error:', err));
+// Vercel re-uses containers. This prevents opening multiple connections.
+let isConnected = false;
 
-// Feedback Schema & Model
-const feedbackSchema = new mongoose.Schema({
-  studentName: {
-    type: String,
-    required: [true, 'Student name is required'],
-    trim: true
-  },
-  courseName: {
-    type: String,
-    required: [true, 'Course name is required'],
-    trim: true
-  },
-  rating: {
-    type: Number,
-    required: [true, 'Rating is required'],
-    min: [1, 'Rating must be at least 1'],
-    max: [5, 'Rating must be at most 5']
-  },
-  comments: {
-    type: String,
-    trim: true,
-    default: ''
-  }
-}, {
-  timestamps: true
-});
-
-const Feedback = mongoose.model('Feedback', feedbackSchema);
-
-// ─── Routes ───────────────────────────────────────────
-
-// POST /feedback - Submit feedback
-app.post('/feedback', async (req, res) => {
+const connectDB = async () => {
+  if (isConnected) return;
   try {
+    const db = await mongoose.connect(MONGO_URI);
+    isConnected = db.connections[0].readyState;
+    console.log('✅ MongoDB connected successfully');
+  } catch (err) {
+    console.error('❌ MongoDB connection error:', err);
+  }
+};
+
+// Connect to DB immediately
+connectDB();
+
+// ─── SCHEMA & MODEL ───────────────────────────────────
+// We use a check to prevent recompiling the model on every function call
+const feedbackSchema = new mongoose.Schema({
+  studentName: { type: String, required: true, trim: true },
+  courseName: { type: String, required: true, trim: true },
+  rating: { type: Number, required: true, min: 1, max: 5 },
+  comments: { type: String, trim: true, default: '' }
+}, { timestamps: true });
+
+const Feedback = mongoose.models.Feedback || mongoose.model('Feedback', feedbackSchema);
+
+// ─── ROUTES ───────────────────────────────────────────
+
+app.post('/api/feedback', async (req, res) => {
+  try {
+    await connectDB();
     const { studentName, courseName, rating, comments } = req.body;
-
-    if (!studentName || !courseName || !rating) {
-      return res.status(400).json({
-        success: false,
-        message: 'studentName, courseName, and rating are required'
-      });
-    }
-
     const feedback = new Feedback({ studentName, courseName, rating, comments });
     await feedback.save();
-
-    res.status(201).json({
-      success: true,
-      message: 'Feedback submitted successfully',
-      data: feedback
-    });
+    res.status(201).json({ success: true, data: feedback });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
 });
 
-// GET /feedback - View all feedback
-app.get('/feedback', async (req, res) => {
+app.get('/api/feedback', async (req, res) => {
   try {
+    await connectDB();
     const feedbacks = await Feedback.find().sort({ createdAt: -1 });
-    res.status(200).json({
-      success: true,
-      count: feedbacks.length,
-      data: feedbacks
-    });
+    res.status(200).json({ success: true, count: feedbacks.length, data: feedbacks });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
 });
 
-// DELETE /feedback/:id - Delete feedback
-app.delete('/feedback/:id', async (req, res) => {
+app.delete('/api/feedback/:id', async (req, res) => {
   try {
+    await connectDB();
     const feedback = await Feedback.findByIdAndDelete(req.params.id);
-    if (!feedback) {
-      return res.status(404).json({ success: false, message: 'Feedback not found' });
-    }
-    res.status(200).json({
-      success: true,
-      message: 'Feedback deleted successfully'
-    });
+    if (!feedback) return res.status(404).json({ success: false, message: 'Not found' });
+    res.status(200).json({ success: true, message: 'Deleted' });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
 });
 
-// Health check
-app.get('/', (req, res) => {
-  res.json({ message: '🎓 Student Feedback API is running', version: '1.0.0' });
+app.get('/api', (req, res) => {
+  res.json({ message: '🎓 Student Feedback API is running' });
 });
 
-// Start server
-const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
-  console.log(`🚀 Server running on http://localhost:${PORT}`);
-});
+// ─── VERCEL EXPORT ────────────────────────────────────
+// Local development: keep the server listening
+if (process.env.NODE_ENV !== 'production') {
+  const PORT = process.env.PORT || 5000;
+  app.listen(PORT, () => console.log(`🚀 Local server: http://localhost:${PORT}`));
+}
+
+// THIS IS THE MOST IMPORTANT LINE FOR VERCEL
+module.exports = app;
