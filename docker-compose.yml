@@ -1,0 +1,40 @@
+version: '3.8'
+
+services:
+  # MongoDB Database
+  mongo:
+    image: mongo:7
+    container_name: feedback_mongo
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    environment:
+      MONGO_INITDB_DATABASE: student_feedback
+
+  # Node.js + Express Backend
+  backend:
+    build: ./backend
+    container_name: feedback_backend
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    environment:
+      MONGO_URI: mongodb+srv://shainacardoza_db_user:Shaina1234@cluster0.elyexdc.mongodb.net/?appName=Cluster0
+      PORT: 5000
+    depends_on:
+      - mongo
+
+  # React Frontend
+  frontend:
+    build: ./frontend
+    container_name: feedback_frontend
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+
+volumes:
+  mongo_data:
